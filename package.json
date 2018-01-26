@@ -4,7 +4,7 @@
     "description": "This child module goes through all content and repair quicklinks.",
     "main": "main.js",
     "dependencies": {
-        "canvas-wrapper": "git+https://github.com/byuitechops/Canvas-wrapper"
+        "canvas-wrapper": "git+https://github.com/byuitechops/Canvas-wrapper.git"
     },
     "devDependencies": {
         "async": "^2.6.0",

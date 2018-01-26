@@ -39,13 +39,30 @@ module.exports = (course, stepCallback) => {
     }
 
     function htmlChecker(course, pages, functionCallback) {
+        // console.log(`LENGTH: ${pages.length}`)
         asyncLib.eachSeries(pages, (page, eachSeriesCallback) => {
+            //p is received as a one-element array consisting of a Page object
             canvas.get(`/api/v1/courses/${course.info.canvasOU}/pages/${page.url}`, (err, p) => {
                 if (err) {
                     eachSeriesCallback(err);
                     return;
                 } else {
-                    console.log(JSON.stringify(p));
+                    // console.log(JSON.stringify(p[0].body));
+                    // console.log(`PAGE TITLE: ${p[0].title}`)
+                    var $ = cheerio.load(p[0].body);
+                    links = $('a');
+                    $(links).each((i, link) => {
+                        // console.log(`LINK ATTR: ${$(link).attr('href')}`);
+                        if ($(link).attr('href').indexOf('drop_box') != -1) {
+                            console.log(`LINK: ${$(link).attr('href')}`);
+                            repairDropbox(course, p[0], (err) => {
+                                if (err) {
+                                    eachSeries(err);
+                                }
+                            });
+                        }
+                        // console.log(`Link: ${$(link).text()} ${$(link).attr('href')}`);
+                    });
                     eachSeriesCallback(null, course);
                 }
             });
@@ -54,6 +71,22 @@ module.exports = (course, stepCallback) => {
                 functionCallback(err);
                 return;
             }
+        });
+    }
+
+    function repairDropbox(course, page, functionCallback) {
+        // console.log(`Dropbox function reached: ${page.title}`);
+        canvas.get(`/api/v1/courses/${course.info.canvasOU}/assignments`, (err, assignments) => {
+            asyncLib.eachSeries(assignments, (assign, eachSeriesCallback) => {
+                if (assign.submission_types.includes('online_upload')) {
+                    console.log(`TITLE: ${assign.name}`);
+                }
+            }, (err) => {
+                if (err) {
+                    functionCallback(err);
+                    return;
+                }
+            });
         });
     }
 
