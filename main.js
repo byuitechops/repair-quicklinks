@@ -25,9 +25,11 @@ var arr = [];
 module.exports = (course, stepCallback) => {
     course.message('repair-quicklinks child module launched.');
 
-    //this function goes through the course and retrieves then traverses through all of the files
+    //this function goes through the course and retrieves all of the pages 
+    //then traverses through all of the pages
     function retrieveFiles(course, functionCallback) {
         getDropboxName();
+
         canvas.get(`/api/v1/courses/${course.info.canvasOU}/pages`, (err, pages) => {
             //begin process of parsing
             htmlChecker(course, pages, (htmlCheckerErr) => {
@@ -41,7 +43,7 @@ module.exports = (course, stepCallback) => {
         });
     }
 
-    //this function goes throug hte html and extracts all of the dropbox links.
+    //this function goes throug the html and extracts all of the dropbox links.
     function htmlChecker(course, pages, functionCallback) {
         asyncLib.eachSeries(pages, (page, eachSeriesCallback) => {
             //p is received as a one-element array consisting of a Page object
@@ -50,17 +52,17 @@ module.exports = (course, stepCallback) => {
                     eachSeriesCallback(err);
                     return;
                 } else {
+                    course.message(`Analyzing ${p[0].title}...`);
+
                     //load the html and grab all of the links
                     var $ = cheerio.load(p[0].body);
                     links = $('a');
                     $(links).each((i, link) => {
-                        console.log(`Link: ${JSON.stringify($(link).attr('href'))}`);
                         //all dropbox links contain the word 'drop_box'
                         if ($(link).attr('href').indexOf('drop_box') != -1) {
-                            console.log(`Found dropbox link`);
-                            repairDropbox(course, p[0], (err) => {
+                            fixDropbox(course, p[0], (err) => {
                                 if (err) {
-                                    eachSeries(err);
+                                    eachSeriesCallback(err);
                                 }
                             });
                         }
@@ -76,11 +78,71 @@ module.exports = (course, stepCallback) => {
         });
     }
 
+    function fixDropbox(course, page, functionCallback) {
+        var newUrl = '';
+
+        course.message(`Found error in ${page.title}`);
+
+        var $ = cheerio.load(page.body);
+        var links = $('a');
+        $(links).each((i, link) => {
+            var url = $(link).attr('href');
+
+            // console.log(`Link: ${$(link).attr('href')}`);
+
+            if (url.indexOf('drop_box') != -1) {
+                //get dropbox number
+                srcUrl = url.split('drop_box_').pop();
+                
+                //get names of dropbox for search_term part of assignments api.
+                arr.forEach((obj) => {
+                    // console.log(`obj.id = ${obj.id}. srcUrl = ${srcUrl}`);
+                    if (obj.id === srcUrl) {
+                        //search term part of the api allows us to retrieve the list of assignments that has that name. 
+                        //here, we extract the html_url from this and return it so it can be properly embedded in the html.
+                        canvas.get(`api/v1/courses/${course.info.canvasOU}/assignments?search_term=${obj.name}`, (err, info) => {
+                            if (err) {
+                                functionCallback(err);
+                                return;
+                            } else {
+                                //some assignments have similar names so more than one quizzes gets returned
+                                //this takes care of that situation
+                                if (info.length > 1) {
+                                    course.message('There are more than one quizzes with a similar name');
+                                    info.forEach((quiz) => {
+                                        if (quiz.name === name) {
+                                            course.message('Found correct link.');
+                                            newUrl = quiz.html_url;
+                                            console.log(`Name: ${name}. New Url: ${newUrl}.`);
+                                        }
+                                    });
+                                //here, we know that there are only one quiz
+                                } else {
+                                    if (quiz.name === name) {
+                                        course.message('Found correct link.');
+                                        newUrl = quiz.html_url;
+                                        console.log(`Name: ${name}. New Url: ${newUrl}.`);
+                                    }
+                                }
+                            }
+                        });
+                    }
+                });
+            }
+        });
+    }
+
+    function retrieveLink(name, functionCallback) {
+        console.log(`Name: ${name}`);
+
+        
+        
+    }
+
     function repairDropbox(course, page, functionCallback) {
         canvas.get(`/api/v1/courses/${course.info.canvasOU}/assignments`, (err, assignments) => {
             asyncLib.eachSeries(assignments, (assign, eachSeriesCallback) => {
                 //all dropboxes have the submission type of 'online_upload'
-                console.log(JSON.stringify(assign));
                 if (assign.submission_types.includes('online_upload')) {
                     //call lambda function to retrive html url
                     arr.map((item) => {
@@ -139,6 +201,7 @@ module.exports = (course, stepCallback) => {
                 name: folder.attribs.name,
                 id: folder.attribs.id
             };
+            
             arr.push(obj);
         });
     }
@@ -167,7 +230,6 @@ module.exports = (course, stepCallback) => {
             }
         });
     }
-
 
     /************************************************************************************
      *                                     START HERE                                    *
