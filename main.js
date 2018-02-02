@@ -14,23 +14,24 @@ const cheerio = require('cheerio');
 
 //utilizing YUI module pattern
 //https://stackoverflow.com/a/2613647/5646003
-var get_array = (() => {
-    var arr = [];
+// var get_array = (() => {
+//     var arr = [];
 
-    return {
-        push: (arg) => {
-            arr.push(arg);
-        },
+//     return {
+//         push: (arg) => {
+//             arr.push(arg);
+//         },
 
-        length: () => {
-            return arr.length;
-        },
+//         length: () => {
+//             return arr.length;
+//         },
 
-        get: () => {
-            return arr;
-        }
-    };
-})();
+//         get: () => {
+//             return arr;
+//         }
+//     };
+// })();
+var arr = [];
 
 module.exports = (course, stepCallback) => {
     course.message('repair-quicklinks child module launched.');
@@ -47,7 +48,7 @@ module.exports = (course, stepCallback) => {
 
         canvas.get(`/api/v1/courses/${course.info.canvasOU}/pages`, (err, pages) => {
             //begin process of parsing
-            htmlChecker(course, pages, (htmlCheckerErr) => {
+            htmlChecker(pages, (htmlCheckerErr) => {
                 if (htmlCheckerErr) {
                     functionCallback(htmlCheckerErr);
                     return;
@@ -88,14 +89,14 @@ module.exports = (course, stepCallback) => {
                         //all broke dropbox links contains the word drop_box
                         if ($(link).attr('href').indexOf('drop_box') != -1) {
                             //we found a dropbox quicklink. 
-                            fixDropbox(course, p[0], (err) => {
+                            fixDropbox(p[0], (err) => {
                                 if (err) {
                                     eachSeriesCallback(err);
                                 }
                             });
                         }
                     });
-                    eachSeriesCallback(null, course);
+                    eachSeriesCallback(null);
                 }
             });
         }, (err) => {
@@ -133,15 +134,22 @@ module.exports = (course, stepCallback) => {
                 srcUrl = url.split('drop_box_').pop();
                 
                 //get names of dropbox for search_term part of assignments api.
-                get_array.get.forEach((obj) => {
+                arr.forEach((obj) => {
                     if (obj.id === srcUrl) {
+                        var tempName = obj.name.split(' ').join('%20');
+                        console.log(`Obj name: ${tempName}`);
+                        console.log(`URL: api/v1/courses/${course.info.canvasOU}/assignments?search_term=${tempName}`);
                         //search term part of the api allows us to retrieve the list of assignments that has that name. 
                         //here, we extract the html_url from this and return it so it can be properly embedded in the html.
-                        canvas.get(`api/v1/courses/${course.info.canvasOU}/assignments?search_term=${obj.name}`, (err, info) => {
+
+                        //the problem happens here
+                        canvas.get(`api/v1/courses/${course.info.canvasOU}/assignments?search_term=${tempName}`, (err, info) => {
                             if (err) {
+                                console.log(`ERROR: ${err}`);
                                 functionCallback(err);
                                 return;
                             } else {
+                                console.log(`INFO: ${JSON.stringify(info)}`);
                                 //some assignments have similar names so more than one quizzes gets returned
                                 //this takes care of that situation
                                 //TODO: ensure that the newUrl is correct 
@@ -252,7 +260,7 @@ module.exports = (course, stepCallback) => {
                 id: folder.attribs.id
             };
             
-            get_array.push(obj);
+            arr.push(obj);
         });
     }
 
