@@ -5,6 +5,9 @@ This module goes through all of the quicklinks and checks to see if the quicklin
 or dropboxes are broken. If they are broken, the child module goes through them and repairs the link
 */
 
+/* View available course object functions */
+// https://github.com/byuitechops/d2l-to-canvas-conversion-tool/blob/master/documentation/classFunctions.mdz
+
 const canvas = require('canvas-wrapper');
 const asyncLib = require('async');
 const cheerio = require('cheerio');
@@ -19,7 +22,7 @@ var get_array = (() => {
             arr.push(arg);
         },
 
-        get_length: () => {
+        length: () => {
             return arr.length;
         },
 
@@ -29,24 +32,17 @@ var get_array = (() => {
     };
 })();
 
-/* View available course object functions */
-// https://github.com/byuitechops/d2l-to-canvas-conversion-tool/blob/master/documentation/classFunctions.md
-
-//PROCESS:
-//1. Get HTML from Pages, Quizzes, Assignments and Discussion Boards
-//2. Sort through & find bad quicklinks
-//3. Get ID from bad link (drop_box_144) ==> you want 144
-//4. Get assignment name from dropbox_d2l.xml using ID
-//5. Make API call to Canvas w/ search term of assignment name
-//6. Use returned assignment's ID to build new link
-//7. Update HTML w/ new link
-
 module.exports = (course, stepCallback) => {
     course.message('repair-quicklinks child module launched.');
 
-    //this function goes through the course and retrieves all of the pages 
-    //then traverses through all of the pages
-    function retrieveFiles(course, functionCallback) {
+    /**************************************************
+     * retrieveFiles
+     *
+     * This function retrieves all of the pages in the
+     * course and goes through them. On each page, it calls
+     * the htmlChecker, which will then analyze the html.
+    **************************************************/
+    function retrieveFiles(functionCallback) {
         getDropboxName();
 
         canvas.get(`/api/v1/courses/${course.info.canvasOU}/pages`, (err, pages) => {
@@ -62,8 +58,17 @@ module.exports = (course, stepCallback) => {
         });
     }
 
-    //this function goes throug the html and extracts all of the dropbox links.
-    function htmlChecker(course, pages, functionCallback) {
+    /**************************************************
+     * htmlChecker
+     *
+     * @param pages -- string
+     *
+     * This function goes through and analyzes each 
+     * link on the page. If it finds a dropbox or quiz 
+     * link, it will call the appropriate function to
+     * repair the link.
+    **************************************************/
+    function htmlChecker(pages, functionCallback) {
         asyncLib.eachSeries(pages, (page, eachSeriesCallback) => {
             //p is received as a one-element array consisting of a Page object
             canvas.get(`/api/v1/courses/${course.info.canvasOU}/pages/${page.url}`, (err, p) => {
@@ -79,7 +84,8 @@ module.exports = (course, stepCallback) => {
 
                     //iterate through the links.
                     $(links).each((i, link) => {
-                        //all dropbox links contain the word 'drop_box'
+                        //check to see if the link contains the dropbox link
+                        //all broke dropbox links contains the word drop_box
                         if ($(link).attr('href').indexOf('drop_box') != -1) {
                             //we found a dropbox quicklink. 
                             fixDropbox(course, p[0], (err) => {
@@ -101,19 +107,22 @@ module.exports = (course, stepCallback) => {
     }
 
     /**************************************************
-    * fixDropbox
-    *
-    * This function goes through the link and retrieves
-    * the name/id from the array (which is built through the 
-    * dropbox_d2l.xml). This function then makes an api
-    * call to retrieve correct url and replace the 
-    * link. 
+     * fixDropbox
+     *
+     * @param page -- string
+     *
+     * This function goes through the link and retrieves
+     * the name/id from the array (which is built through the 
+     * dropbox_d2l.xml). This function then makes an api
+     * call to retrieve correct url and replace the 
+     * link. 
     **************************************************/
-    function fixDropbox(course, page, functionCallback) {
+    function fixDropbox(page, functionCallback) {
         var newUrl = '';
 
-        course.message(`Found error in ${page.title}`);
+        course.message(`Found broken link in ${page.title}`);
 
+        //load the html and grab all links.
         var $ = cheerio.load(page.body);
         var links = $('a');
         $(links).each((i, link) => {
@@ -162,73 +171,74 @@ module.exports = (course, stepCallback) => {
         });
     }
 
-    //TODO: fill this function to replace the link after the new url has been found.
-    function replaceLink() {
+    /****************************************************************
+     * replaceLink
+     * 
+     * @param badLink -- string
+     * @param newLink -- string
+     * @param $ -- object -- cheerio
+     * @param pageUrl -- string
+     * @param functionCallback
+     * 
+     * This function goes through and replaces all of the bad links with the correct link. 
+     * If there are multiple instances of the same bad link through the page, this will
+     * replace them all.
+    ******************************************************************/
+    function replaceLink(badLink, newLink, $, pageUrl, functionCallback) {
+        //grab all a tags in html
+        var links = $('a');
 
-    }
-
-    //not being used at the moment.
-    function retrieveLink(name, functionCallback) {
-        console.log(`Name: ${name}`);
-
-        
-        
-    }
-
-    //not being used at the moment.
-    function repairDropbox(course, page, functionCallback) {
-        canvas.get(`/api/v1/courses/${course.info.canvasOU}/assignments`, (err, assignments) => {
-            asyncLib.eachSeries(assignments, (assign, eachSeriesCallback) => {
-                //all dropboxes have the submission type of 'online_upload'
-                if (assign.submission_types.includes('online_upload')) {
-                    //call lambda function to retrive html url
-                    get_array.get.map((item) => {
-                        getDropboxes(course, item.name, (err) => {
-                            if (err) {
-                                eachSeriesCallback(err);
-                            } else {
-                                eachSeriesCallback(null);
-                            }
-                        });
-                    });
-                }
-            }, (err) => {
-                if (err) {
-                    functionCallback(err);
-                    return;
-                } else {
-                    functionCallback(null, course);
-                    return;
-                }
-            });
+        //replace bad link with new one
+        links.attr('href', (i, link) => {
+            return link.replace(badLink, newLink);
         });
-    }
 
-    //5. Make API call to Canvas w/ search term of assignment name
-    //not being used at the moment.
-    function getDropboxes(course, title, functionCallback) {
-        canvas.get(`/api/v1/courses/${course.info.canvasOU}/assignments`, (err, dropboxes) => {
-            asyncLib.each(dropboxes, (item, eachLimitCallback) => {
-                if (err) {
-                    eachLimitCallback(err);
-                } else {
-                    if (item.name === title) {
-                        return item.html_url;
-                    }
-                }
-            });
-        }, (err) => {
+        course.message(`Link replacement completed. Initializing htmlInjection to update page.`);
+
+        //the html has been fixed. call this function to push the changes online
+        htmlInjection(pageUrl, $.html(), (err, results) => {
             if (err) {
                 functionCallback(err);
-                return;
             } else {
-                functionCallback(null);
-                return;
+                functionCallback(null, results);
             }
         });
     }
 
-    //retrieve the dropbox names and store the results in the array
+    /****************************************************************
+     * htmlInjection
+     * 
+     * @param pageUrl -- string
+     * @param html -- string
+     * @param functionCallback
+     * 
+     * This function makes an api call to Canvas and utilizes the update
+     * page to update the body, which essentially holds the html.
+    ******************************************************************/
+    function htmlInjection(pageUrl, html, functionCallback) {
+        canvas.put(`/api/v1/courses/${course.info.canvasOU}/pages/${pageUrl}`, {
+            'wiki_page': {
+                'body': html //body contains a string of the html code.
+            }
+        }, (err, results) => {
+            if (err) {
+                functionCallback(err);
+                return;
+            } else {
+                course.message(`Successfully injected new html - url: ${pageUrl}`);
+                functionCallback(null, results);
+            }
+        });
+
+    }
+
+    /****************************************************************
+     * getDropboxName
+     * 
+     * This function retrieves the dropbox_d2l.xml which holds all of
+     * the dropbox information. This function parses the xml file and 
+     * stores all of the information in an array.
+    ******************************************************************/
     function getDropboxName() {
         //retrieve the dropbox_d2l.xml file
         var dropbox = getDropboxFile();
@@ -246,7 +256,12 @@ module.exports = (course, stepCallback) => {
         });
     }
 
-    //parse through the course.info file to get the .xml which contains the name/id of the dropboxes
+    /****************************************************************
+     * getDropboxFile
+     * 
+     * This function simply retrieves the dropbox_d2l.xml from the 
+     * course.content.
+    ******************************************************************/
     function getDropboxFile() {
         var file = course.content.find((file) => {
             return file.name === `dropbox_d2l.xml`;
@@ -255,28 +270,13 @@ module.exports = (course, stepCallback) => {
         return file;
     }
 
-    function initiateWaterfall(course, functionCallback) {
-        var functions = [
-            asyncLib.constant(course),
-            retrieveFiles
-        ];
-
-        asyncLib.waterfall(functions, (waterfallErr, results) => {
-            if (waterfallErr) {
-                functionCallback(waterfallErr);
-                return;
-            } else {
-                functionCallback(null, course);
-            }
-        });
-    }
-
     /************************************************************************************
-     *                                     START HERE                                    *
-     ************************************************************************************/
-    initiateWaterfall(course, (waterfallErr, results) => {
-        if (waterfallErr) {
-            course.error(waterfallErr);
+      *                                    START HERE                                  
+    *************************************************************************************/
+    //stepCallback(null, course) is always called regardless of the success of this child module
+    retrieveFiles((err, results) => {
+        if (err) {
+            course.error(err);
             stepCallback(null, course);
         } else {
             course.message(`Successfully completed repair-quicklinks child module`);
