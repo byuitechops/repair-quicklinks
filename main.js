@@ -164,9 +164,9 @@ module.exports = (course, stepCallback) => {
                                     } else {
                                         //only one assignment returned. let's check the names to make sure
                                         //that we got the correct one.
-                                        if (quiz.name === obj.name) {
+                                        if (info.name === obj.name) {
                                             course.message('Found correct link.');
-                                            newUrl = quiz.html_url;
+                                            newUrl = info.html_url;
                                             console.log(`Name: ${obj.name}. New Url: ${newUrl}.`);
                                         }
                                     }
@@ -184,6 +184,8 @@ module.exports = (course, stepCallback) => {
                             eachCallback(null);
                         }
                     });
+                } else {
+                    eachCallback(null);
                 }
             }, (err) => {
                 if (err) {
