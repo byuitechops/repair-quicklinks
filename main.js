@@ -6,7 +6,10 @@ If they are broken, the child module goes through them and repairs the broken qu
 */
 
 /* View available course object functions */
-// https://github.com/byuitechops/d2l-to-canvas-conversion-tool/blob/master/documentation/classFunctions.mdz
+// https://github.com/byuitechops/d2l-to-canvas-conversion-tool/blob/master/documentation/classFunctions.md
+
+// TODO: Merge the multiple/single dropbox into one function and create a bool to determine whether to call
+// a function or to add to array.
 
 const canvas = require('canvas-wrapper');
 const asyncLib = require('async');
