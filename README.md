@@ -49,7 +49,7 @@ to get the name of the dropbox.
 
 List the categories used in logging data in your module.
 
-- bad link, new link - Title: replace-dropbox-quicklinks
+- bad link, new link, page url - Title: replace-dropbox-quicklinks
 
 ## Requirements
 
