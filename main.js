@@ -16,6 +16,7 @@ const asyncLib = require('async');
 const cheerio = require('cheerio');
 
 var xmlAssignments = [];
+var brokenLinks = [];
 
 module.exports = (course, stepCallback) => {
     course.message('repair-quicklinks child module launched.');
@@ -39,61 +40,10 @@ module.exports = (course, stepCallback) => {
                     functionCallback(htmlCheckerErr);
                     return;
                 } else {
-                    console.log(`about to return 2`); 
                     functionCallback(null);
                     return;
                 }
             });
-        });
-    }
-
-    /****************************************************************
-     * findDropboxes
-     * 
-     * @param page -- string
-     * @param functionCallback
-     * 
-     * This function goes through and ensures that the links in the 
-     * webpage consists of dropbox links.
-    ******************************************************************/
-    function findDropboxes(page, eachCallback) {
-        dropboxBool = false;
-
-        canvas.get(`/api/v1/courses/${course.info.canvasOU}/pages/${page.url}`, (err, p) => {
-            if (err) {
-                eachCallback(err);
-                return;
-            } else {
-                var $ = cheerio.load(p[0].body);
-                var links = $('a');
-
-                //checking for links
-                if (links.length <= 0) {
-                    eachCallback(null);
-                //links exist
-                } else {
-                    //going through and checking each link to see if it is a dropbox
-                    $(links).each((index, link) => {
-                        //if dropbox is not present, it returns -1
-                        if ($(link).attr('href').indexOf('drop_box') != -1) {
-                            dropboxBool = true;
-                        }
-                    });
-
-                    //dropbox has been found
-                    if (dropboxBool) {
-                        fixDropbox(p[0], (err) => {
-                            if (err) {
-                                eachCallback(err);
-                            } else {
-                                eachCallback(null);
-                            }
-                        });
-
-                        dropboxBool = false;
-                    }
-                } 
-            }
         });
     }
 
@@ -107,16 +57,103 @@ module.exports = (course, stepCallback) => {
      * the program. 
     ******************************************************************/
     function htmlChecker(pages, functionCallback) {
+        //inside this function, do a waterfall for the process.
+
         var dropboxBool = false;
 
-        asyncLib.each(pages, findDropboxes, (err) => {
+        asyncLib.eachSeries(pages, findDropboxes, (err, eachCallback) => {
+            if (err) {
+                eachCallback(err);
+            } else {
+                eachCallback(null);
+            }
+        }, (err) => {
             if (err) {
                 functionCallback(err);
                 return;
             } else {
-                console.log(`About to return 1`);
                 functionCallback(null);
                 return;
+            }
+        });
+    }
+
+    /****************************************************************
+     * findDropboxes
+     * 
+     * @param page -- string
+     * @param functionCallback
+     * 
+     * This function goes through and ensures that the links in the 
+     * webpage consists of dropbox links.
+    ******************************************************************/
+    function findDropboxes(page, functionCallback) {
+        dropboxBool = false;
+
+        canvas.get(`/api/v1/courses/${course.info.canvasOU}/pages/${page.url}`, (err, p) => {
+            if (err) {
+                functionCallback(err);
+                return;
+            } else {
+                var $ = cheerio.load(p[0].body);
+                var links = $('a');
+
+                //checking for links
+                if (links.length <= 0) {
+                    functionCallback(null);
+                    //links exist
+                } else {
+                    //going through and checking each link to see if it is a dropbox
+                    $(links).each((index, link) => {
+                        //if dropbox is not present, it returns -1
+                        if ($(link).attr('href').indexOf('drop_box') != -1) {
+                            dropboxBool = true;
+                        }
+                    });
+
+                    //dropbox has been found
+                    if (dropboxBool) {
+                        fixDropbox(p[0], (err) => {
+                            if (err) {
+                                functionCallback(err);
+                            } else {
+                                functionCallback(null);
+                            }
+                        });
+
+                        dropboxBool = false;
+                    }
+                }
+            }
+        });
+    }
+
+    /****************************************************************
+     * fixDropbox
+     * 
+     * @param page -- webpage - string
+     * @param functionCallback
+     * 
+     * This function goes through and calls the appropriate functions
+     * to fix the dropboxes. All in all, this is the driver for the 
+     * fixing of dropboxes.
+    ******************************************************************/
+    function fixDropbox(page, functionCallback) {
+        console.log(`Fix Dropbox CALLED`)
+        
+        var functions = [
+            asyncLib.apply(findBrokenDropboxLinks, page),
+            findBrokenDropboxLinks,
+            replaceLinks
+        ];
+
+        asyncLib.waterfall(functions, (waterfallErr, results) => {
+            if (waterfallErr) {
+                functionCallback(err);
+            } else {
+                //resetting brokenLinks array
+                brokenLinks = [];
+                functionCallback(null);
             }
         });
     }
@@ -131,8 +168,13 @@ module.exports = (course, stepCallback) => {
      * makes an API call to Canvas to retrieve the correct URL for the 
      * dropbox assignment.
     ******************************************************************/
-    function findBrokenDropboxLinks(link, functionCallback) {
-        var url = $(link).attr('href');
+    function findBrokenDropboxLinks(page, functionCallback) {
+        console.log(`findBrokenDropboxLinks has been called`);
+        // console.log(`JSON: ${JSON.stringify(page)}`);
+        var $ = cheerio.load(page.body);
+        var links = $('a');
+        var url = $(links).attr('href');
+        var newUrl = '';
 
         //going through each link on the page
         if (url.indexOf('drop_box') != 1) {
@@ -154,7 +196,8 @@ module.exports = (course, stepCallback) => {
                             if (assignments.length > 1) {
                                 assignments.forEach((assignment) => {
                                     if (assignment.name === xmlAssignment.name) {
-                                        course.message(`Found dropbox link.`);
+                                        course.message(`Found dropbox link on ${page.title}.`);
+
                                         newUrl = assignment.html_url;
 
                                         brokenLinks.push({
@@ -172,6 +215,8 @@ module.exports = (course, stepCallback) => {
                                 //that we got the correct one.
 
                                 if (assignments[0].name === xmlAssignment.name) {
+                                    course.message(`Found dropbox link on ${page.title}.`);
+
                                     newUrl = assignments[0].html_url;
                                     brokenLinks.push({
                                         'badLink': url,
@@ -190,48 +235,12 @@ module.exports = (course, stepCallback) => {
                 if (err) {
                     functionCallback(err);
                 } else {
-                    functionCallback(null);
+                    functionCallback(null, $, page.url);
                 }
-            })
+            });
         } else {
-            functionCallback(null);
+            functionCallback(null, $, page.url);
         }
-    }
-
-    /****************************************************************
-     * fixDropbox
-     * 
-     * @param page -- webpage - string
-     * @param functionCallback
-     * 
-     * This function goes through and calls the appropriate functions
-     * to fix the dropboxes. All in all, this is the driver for the 
-     * fixing of dropboxes.
-    ******************************************************************/
-    function fixDropbox(page, functionCallback) {
-        var newUrl = '';
-        var brokenLinks = [];
-        var $ = cheerio.load(page.body);
-        var links = $('a');
-        
-        asyncLib.each($(links), findBrokenDropboxLinks, (err) => {
-            if (err) {
-                functionCallback(err);
-                return;
-            } else {
-                replaceLinks(brokenLinks, $, page.url, (err) => {
-                    if (err) {
-                        functionCallback(err);
-                        return;
-                    } else {
-                        console.log(`functionCallback 1`);
-                        functionCallback(null);
-                        return;
-                    }
-                });
-                console.log(`here1121212`);
-            }
-        });
     }
 
     /****************************************************************
@@ -246,7 +255,7 @@ module.exports = (course, stepCallback) => {
      * If there are multiple instances of the same bad link through the page, this will
      * replace them all.
     ******************************************************************/
-    function replaceLinks(brokenLinks, $, pageUrl, functionCallback) {
+    function replaceLinks($, pageUrl, functionCallback) {
         //grab all a tags in html
         var links = $('a');
 
@@ -258,11 +267,10 @@ module.exports = (course, stepCallback) => {
 
             course.log(`replace-dropbox-quicklinks`, {
                 'badLink': brokenLink.badLink,
-                'newLink': brokenLink.newLink
+                'newLink': brokenLink.newLink,
+                'page': pageUrl
             });                
         });
-
-        course.message(`Link replacement completed. Initializing htmlInjection to update page.`);
 
         //the html has been fixed. call this function to push the changes online
         htmlInjection(pageUrl, $.html(), (err) => {
