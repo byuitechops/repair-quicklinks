@@ -16,7 +16,6 @@ const asyncLib = require('async');
 const cheerio = require('cheerio');
 
 var xmlAssignments = [];
-var brokenLinks = [];
 
 module.exports = (course, stepCallback) => {
     course.message('repair-quicklinks child module launched.');
@@ -28,52 +27,14 @@ module.exports = (course, stepCallback) => {
      * course and goes through them. On each page, it calls
      * the htmlChecker, which will then analyze the html.
     **************************************************/
-    function retrieveFiles(functionCallback) {
-        getDropboxName();
-
+    function retrieveFiles(retrieveFilesCallback) {
         canvas.get(`/api/v1/courses/${course.info.canvasOU}/pages`, (err, pages) => {
-            course.message(`Executing page analysis stage...`);
-
-            //begin process of parsing
-            htmlChecker(pages, (htmlCheckerErr) => {
-                if (htmlCheckerErr) {
-                    functionCallback(htmlCheckerErr);
-                    return;
-                } else {
-                    functionCallback(null);
-                    return;
-                }
-            });
-        });
-    }
-
-    /****************************************************************
-     * htmlChecker
-     * 
-     * @param page -- string
-     * @param functionCallback
-     * 
-     * This function performs as a driver for the dropbox functions in
-     * the program. 
-    ******************************************************************/
-    function htmlChecker(pages, functionCallback) {
-        //inside this function, do a waterfall for the process.
-
-        var dropboxBool = false;
-
-        asyncLib.eachSeries(pages, findDropboxes, (err, eachCallback) => {
             if (err) {
-                eachCallback(err);
-            } else {
-                eachCallback(null);
-            }
-        }, (err) => {
-            if (err) {
-                functionCallback(err);
+                retrieveFilesCallback(err);
                 return;
             } else {
-                functionCallback(null);
-                return;
+                course.message(`Executing page analysis stage...`);
+                retrieveFilesCallback(null, pages);
             }
         });
     }
@@ -87,160 +48,158 @@ module.exports = (course, stepCallback) => {
      * This function goes through and ensures that the links in the 
      * webpage consists of dropbox links.
     ******************************************************************/
-    function findDropboxes(page, functionCallback) {
-        dropboxBool = false;
+    function findDropboxes(pages, findDropboxesCallback) {
+        course.message(`Processing course pages.`);
 
-        canvas.get(`/api/v1/courses/${course.info.canvasOU}/pages/${page.url}`, (err, p) => {
-            if (err) {
-                functionCallback(err);
-                return;
-            } else {
-                var $ = cheerio.load(p[0].body);
-                var links = $('a');
+        var dropboxBool = false;
+        var pagesWithDropboxLinks = [];
 
-                //checking for links
-                if (links.length <= 0) {
-                    functionCallback(null);
-                    //links exist
+        asyncLib.each(pages, (page, eachCallback) => {
+            canvas.get(`/api/v1/courses/${course.info.canvasOU}/pages/${page.url}`, (err, p) => {
+                if (err) {
+                    eachCallback(err);
+                    return;
                 } else {
-                    //going through and checking each link to see if it is a dropbox
-                    $(links).each((index, link) => {
-                        //if dropbox is not present, it returns -1
-                        if ($(link).attr('href').indexOf('drop_box') != -1) {
-                            dropboxBool = true;
-                        }
-                    });
+                    var $ = cheerio.load(p[0].body);
+                    var links = $('a');
 
-                    //dropbox has been found
-                    if (dropboxBool) {
-                        fixDropbox(p[0], (err) => {
-                            if (err) {
-                                functionCallback(err);
-                            } else {
-                                functionCallback(null);
+                    //checking for links
+                    if (links.length <= 0) {
+                        eachCallback(null);
+                        //links exist
+                    } else {
+                        //going through and checking each link to see if it is a dropbox
+                        $(links).each((index, link) => {
+                            //if dropbox is not present, it returns -1
+                            if ($(link).attr('href').indexOf('drop_box') != -1) {
+                                dropboxBool = true;
                             }
                         });
 
-                        dropboxBool = false;
+                        //dropbox has been found
+                        if (dropboxBool) {
+                            course.message(`Identified page with dropbox link(s)`);
+                            pagesWithDropboxLinks.push(p);
+
+                            dropboxBool = false;
+                            eachCallback(null);
+                        }
+                        else {
+                            eachCallback(null);
+                        }
                     }
                 }
-            }
-        });
-    }
-
-    /****************************************************************
-     * fixDropbox
-     * 
-     * @param page -- webpage - string
-     * @param functionCallback
-     * 
-     * This function goes through and calls the appropriate functions
-     * to fix the dropboxes. All in all, this is the driver for the 
-     * fixing of dropboxes.
-    ******************************************************************/
-    function fixDropbox(page, functionCallback) {
-        console.log(`Fix Dropbox CALLED`)
-        
-        var functions = [
-            asyncLib.apply(findBrokenDropboxLinks, page),
-            findBrokenDropboxLinks,
-            replaceLinks
-        ];
-
-        asyncLib.waterfall(functions, (waterfallErr, results) => {
-            if (waterfallErr) {
-                functionCallback(err);
+            });
+        }, (err) => {
+            if (err) {
+                findDropboxesCallback(err);
+                return;
             } else {
-                //resetting brokenLinks array
-                brokenLinks = [];
-                functionCallback(null);
+                findDropboxesCallback(null, pagesWithDropboxLinks);
+                return;
             }
         });
     }
 
-    /****************************************************************
-     * findBrokenDropboxLinks
-     * 
-     * @param link -- string
-     * @param functionCallback
-     * 
-     * This function goes through and finds the correct title and then
-     * makes an API call to Canvas to retrieve the correct URL for the 
-     * dropbox assignment.
-    ******************************************************************/
-    function findBrokenDropboxLinks(page, functionCallback) {
-        console.log(`findBrokenDropboxLinks has been called`);
-        // console.log(`JSON: ${JSON.stringify(page)}`);
-        var $ = cheerio.load(page.body);
-        var links = $('a');
-        var url = $(links).attr('href');
-        var newUrl = '';
+    function parsePages(pagesWithDropboxLinks, parsePagesCallback) {
+        var pagesToLookInto = [];
+        
+        course.message(`Now parsing ${pagesWithDropboxLinks.length} pages that contains dropbox link(s)`);
 
-        //going through each link on the page
-        if (url.indexOf('drop_box') != 1) {
+        asyncLib.eachSeries(pagesWithDropboxLinks, (page, eachSeriesCallback) => {
+            course.message(`Analyzing ${page[0].title}`);
+            var $ = cheerio.load(page[0].body);
+            var links = $('a');
+            var url = $(links).attr('href')
+            
             //get id
             srcId = url.split('drop_box_').pop();
 
             asyncLib.each(xmlAssignments, (xmlAssignment, eachCallback) => {
                 if (srcId === xmlAssignment.id) {
-                    //replace spaces with %20
-                    var tempName = xmlAssignment.name.split(' ').join('%20');
-
-                    //make api call
-                    canvas.get(`/api/v1/courses/${course.info.canvasOU}/assignments?search_term=${tempName}`, (err, assignments) => {
-                        if (err) {
-                            eachCallback(err);
-                            return;
-                        } else {
-                            //there are more than one assignment returned
-                            if (assignments.length > 1) {
-                                assignments.forEach((assignment) => {
-                                    if (assignment.name === xmlAssignment.name) {
-                                        course.message(`Found dropbox link on ${page.title}.`);
-
-                                        newUrl = assignment.html_url;
-
-                                        brokenLinks.push({
-                                            'badLink': url,
-                                            'newLink': newUrl
-                                        });
-                                    }
-                                });
-
-                                eachCallback(null);
-
-                                //here, we know that there are only one quiz
-                            } else {
-                                //only one assignment returned. let's check the names to make sure
-                                //that we got the correct one.
-
-                                if (assignments[0].name === xmlAssignment.name) {
-                                    course.message(`Found dropbox link on ${page.title}.`);
-
-                                    newUrl = assignments[0].html_url;
-                                    brokenLinks.push({
-                                        'badLink': url,
-                                        'newLink': newUrl
-                                    });
-                                }
-
-                                eachCallback(null);
-                            }
-                        }
+                    pagesToLookInto.push({
+                        'srcId': srcId,
+                        'd2l': xmlAssignment,
+                        'url': url,
+                        'page': page
                     });
+
+                    eachCallback(null);
                 } else {
                     eachCallback(null);
                 }
             }, (err) => {
                 if (err) {
-                    functionCallback(err);
+                    eachSeriesCallback(err);
                 } else {
-                    functionCallback(null, $, page.url);
+                    eachSeriesCallback(null);
                 }
             });
-        } else {
-            functionCallback(null, $, page.url);
-        }
+        }, (err) => {
+            if (err) {
+                parsePagesCallback(err);
+                return;
+            } else {
+                parsePagesCallback(null, pagesToLookInto);
+                return;
+            }
+        });
+    }
+
+    function getCorrectLinks(pagesToLookInto, getCorrectLinksCallback) {
+        var brokenLinks = [];
+        asyncLib.each(pagesToLookInto, (obj, eachCallback) => {
+            canvas.get(`/api/v1/courses/${course.info.canvasOU}/assignments?search_term=${obj.d2l.name}`, (err, assignments) => {
+                if (err) {
+                    eachCallback(err);
+                    return;
+                } else {
+                    //there are more than one assignment returned
+                    if (assignments.length > 1) {
+                        assignments.forEach((assignment) => {
+                            if (assignment.name === obj.name) {
+
+                                newUrl = assignment.html_url;
+
+                                brokenLinks.push({
+                                    'badLink': obj.url,
+                                    'newLink': newUrl,
+                                    'page': obj.page
+                                });
+                            }
+                        });
+
+                        eachCallback(null);
+
+                        //here, we know that there are only one quiz
+                    } else {
+                        //only one assignment returned. let's check the names to make sure
+                        //that we got the correct one.
+
+                        if (assignments[0].name === obj.name) {
+
+                            newUrl = assignments[0].html_url;
+
+                            brokenLinks.push({
+                                'badLink': obj.url,
+                                'newLink': newUrl,
+                                'page': obj.page
+                            });
+                        }
+
+                        eachCallback(null);
+                    }
+                }
+            });
+        }, (err) => {
+            if (err) {
+                getCorrectLinksCallback(err);
+                return;
+            } else {
+                getCorrectLinksCallback(null, brokenLinks);
+                return;
+            }
+        });
     }
 
     /****************************************************************
@@ -255,11 +214,13 @@ module.exports = (course, stepCallback) => {
      * If there are multiple instances of the same bad link through the page, this will
      * replace them all.
     ******************************************************************/
-    function replaceLinks($, pageUrl, functionCallback) {
-        //grab all a tags in html
-        var links = $('a');
+    function replaceLinks(brokenLinks, replaceLinkCallback) {
+        asyncLib.each(brokenLinks, (brokenLink, eachCallback) => {
+            var $ = cheerio.load(brokenLink.page.body);
 
-        brokenLinks.forEach((brokenLink) => {
+            //grab all a tags in html
+            var links = $('a');
+
             //replace bad link with new one
             links.attr('href', (i, link) => {
                 return link.replace(brokenLink.badLink, brokenLink.newLink);
@@ -268,16 +229,24 @@ module.exports = (course, stepCallback) => {
             course.log(`replace-dropbox-quicklinks`, {
                 'badLink': brokenLink.badLink,
                 'newLink': brokenLink.newLink,
-                'page': pageUrl
-            });                
-        });
-
-        //the html has been fixed. call this function to push the changes online
-        htmlInjection(pageUrl, $.html(), (err) => {
+                'page': brokenLink.page.url
+            });
+            
+            //the html has been fixed. call this function to push the changes online
+            htmlInjection(brokenLink.page.url, $.html(), (err) => {
+                if (err) {
+                    eachCallback(err);
+                } else {
+                    eachCallback(null);
+                }
+            });
+        }, (err) => {
             if (err) {
-                functionCallback(err);
+                replaceLinkCallback(err);
+                return;
             } else {
-                functionCallback(null);
+                replaceLinkCallback(null);
+                return;
             }
         });
     }
@@ -292,18 +261,18 @@ module.exports = (course, stepCallback) => {
      * This function makes an api call to Canvas and utilizes the update
      * page to update the body, which essentially holds the html.
     ******************************************************************/
-    function htmlInjection(pageUrl, html, functionCallback) {
+    function htmlInjection(pageUrl, html, htmlInjectionCallback) {
         canvas.put(`/api/v1/courses/${course.info.canvasOU}/pages/${pageUrl}`, {
             'wiki_page': {
                 'body': html //body contains a string of the html code.
             }
         }, (err, results) => {
             if (err) {
-                functionCallback(err);
+                htmlInjectionCallback(err);
                 return;
             } else {
                 course.message(`Successfully injected new html in url: ${pageUrl}`);
-                functionCallback(null);
+                htmlInjectionCallback(null);
             }
         });
 
@@ -316,21 +285,29 @@ module.exports = (course, stepCallback) => {
      * the dropbox information. This function parses the xml file and 
      * stores all of the information in an array.
     ******************************************************************/
-    function getDropboxName() {
+    function getDropboxName(getDropboxNameCalback) {
         //retrieve the dropbox_d2l.xml file
         var dropbox = getDropboxFile();
-        var $ = dropbox.dom;
+        
+        //error checking
+        if (dropbox != undefined) {
+            var $ = dropbox.dom;
 
-        //iterate through the xml nodes and retrieve the id and name 
-        //of each dropbox folder
-        $('dropbox > folder').each((index, folder) => {
-            var obj = {
-                name: folder.attribs.name,
-                id: folder.attribs.id
-            };
-            
-            xmlAssignments.push(obj);
-        });
+            //iterate through the xml nodes and retrieve the id and name 
+            //of each dropbox folder
+            $('dropbox > folder').each((index, folder) => {
+                var obj = {
+                    name: folder.attribs.name,
+                    id: folder.attribs.id
+                };
+
+                xmlAssignments.push(obj);
+            });
+
+            getDropboxNameCalback(null);
+        } else {
+            getDropboxNameCalback(Error('ERROR: File does not exist.'));
+        }
     }
 
     /****************************************************************
@@ -347,18 +324,31 @@ module.exports = (course, stepCallback) => {
         return file;
     }
 
-    /************************************************************************************
-      *                                    START HERE                                  
-    *************************************************************************************/
-    // stepCallback(null, course) is always called regardless of the success of this child module
-    // begin the process..
-    retrieveFiles((err) => {
-        if (err) {
-            course.error(err);
-            stepCallback(null, course);
-        } else {
+    function beginProcess() {
+        var functions = [
+            getDropboxName,
+            retrieveFiles,
+            findDropboxes,
+            parsePages,
+            getCorrectLinks,
+            replaceLinks
+        ];
+
+        asyncLib.waterfall(functions, (waterfallErr) => {
+            if (waterfallErr) {
+                course.error(waterfallErr);
+            }
+
             course.message(`Successfully completed repair-quicklinks child module`);
             stepCallback(null, course);
-        }
-    });
+        });  
+    }
+    // stepCallback(null, course) is always called regardless of the success of this child module
+    // begin the process..
+    
+
+    /************************************************************************************
+     *                                    START HERE                                  
+     *************************************************************************************/
+    beginProcess();
 };
