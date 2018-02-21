@@ -110,34 +110,50 @@ module.exports = (course, stepCallback) => {
             course.message(`Analyzing ${page[0].title}`);
             var $ = cheerio.load(page[0].body);
             var links = $('a');
-            var url = $(links).attr('href')
             
-            //get id
-            srcId = url.split('drop_box_').pop();
+            asyncLib.each($(links), (link, innerEachSeriesCallback) => {
+                var url = $(link).attr('href');
 
-            asyncLib.each(xmlAssignments, (xmlAssignment, eachCallback) => {
-                if (srcId === xmlAssignment.id) {
-                    pagesToLookInto.push({
-                        'srcId': srcId,
-                        'd2l': xmlAssignment,
-                        'url': url,
-                        'page': page
+                if (url.includes('drop_box_')) {
+                    //get id from the bad link
+                    srcId = url.split('drop_box_').pop();
+
+                    asyncLib.each(xmlAssignments, (xmlAssignment, eachCallback) => {
+
+                        //somehow, the XML changed numbers and pushed all of the numbers up 3 which 
+                        //makes this required. this shouldn't be required.. ¯\_(ツ)_/¯
+                        if (((parseInt(srcId)) + 3).toString() === xmlAssignment.id) {
+                            pagesToLookInto.push({
+                                'srcId': srcId,
+                                'd2l': xmlAssignment,
+                                'url': url,
+                                'page': page
+                            });
+
+                            eachCallback(null);
+                        } else {
+                            eachCallback(null);
+                        }
+                    }, (innerEachSeriesErr) => {
+                        if (innerEachSeriesErr) {
+                            innerEachSeriesCallback(innerEachSeriesErr);
+                        } else {
+                            innerEachSeriesCallback(null);
+                        }
                     });
-
-                    eachCallback(null);
                 } else {
-                    eachCallback(null);
+                    innerEachSeriesCallback(null);
                 }
-            }, (err) => {
-                if (err) {
-                    eachSeriesCallback(err);
+            }, (eachErr) => {
+                if (eachErr) {
+                    eachSeriesCallback(eachErr);
                 } else {
                     eachSeriesCallback(null);
                 }
             });
-        }, (err) => {
-            if (err) {
-                parsePagesCallback(err);
+        }, (eachSeriesErr) => {
+            if (eachSeriesErr) {
+                parsePagesCallback(eachSeriesErr);
                 return;
             } else {
                 parsePagesCallback(null, pagesToLookInto);
@@ -148,8 +164,9 @@ module.exports = (course, stepCallback) => {
 
     function getCorrectLinks(pagesToLookInto, getCorrectLinksCallback) {
         var brokenLinks = [];
-        asyncLib.each(pagesToLookInto, (obj, eachCallback) => {
-            canvas.get(`/api/v1/courses/${course.info.canvasOU}/assignments?search_term=${obj.d2l.name}`, (err, assignments) => {
+        JSON.stringify(`pagesToLookInto 2: ${pagesToLookInto}`);
+        asyncLib.each(pagesToLookInto, (page, eachCallback) => {
+            canvas.get(`/api/v1/courses/${course.info.canvasOU}/assignments?search_term=${page.d2l.name}`, (err, assignments) => {
                 if (err) {
                     eachCallback(err);
                     return;
@@ -157,33 +174,35 @@ module.exports = (course, stepCallback) => {
                     //there are more than one assignment returned
                     if (assignments.length > 1) {
                         assignments.forEach((assignment) => {
-                            if (assignment.name === obj.name) {
-
+                            if (assignment.name === page.d2l.name) {
+                                //link to replace the bad link
                                 newUrl = assignment.html_url;
 
+                                //create an object of things we need
                                 brokenLinks.push({
-                                    'badLink': obj.url,
+                                    'badLink': page.url,
                                     'newLink': newUrl,
-                                    'page': obj.page
+                                    'page': page.page[0]
                                 });
                             }
                         });
 
                         eachCallback(null);
 
-                        //here, we know that there are only one quiz
+                    //here, we know that there are only one quiz
                     } else {
                         //only one assignment returned. let's check the names to make sure
                         //that we got the correct one.
 
-                        if (assignments[0].name === obj.name) {
-
+                        if (assignments[0].name === page.page[0].title) {
+                            //link to replace the bad link
                             newUrl = assignments[0].html_url;
 
+                            //create an object of things we need
                             brokenLinks.push({
-                                'badLink': obj.url,
+                                'badLink': page.url,
                                 'newLink': newUrl,
-                                'page': obj.page
+                                'page': page.page[0]
                             });
                         }
 
@@ -343,8 +362,6 @@ module.exports = (course, stepCallback) => {
             stepCallback(null, course);
         });  
     }
-    // stepCallback(null, course) is always called regardless of the success of this child module
-    // begin the process..
     
 
     /************************************************************************************
