@@ -14,6 +14,7 @@ If they are broken, the child module goes through them and repairs the broken qu
 const canvas = require('canvas-wrapper');
 const asyncLib = require('async');
 const cheerio = require('cheerio');
+const _ = require('underscore');
 
 var xmlAssignments = [];
 
@@ -101,6 +102,14 @@ module.exports = (course, stepCallback) => {
         });
     }
 
+    /****************************************************************
+     * parsePages
+     * 
+     * @param pagesWithDropboxLinks
+     * @param parsePagesCallback
+     * 
+     * 
+    ******************************************************************/
     function parsePages(pagesWithDropboxLinks, parsePagesCallback) {
         var pagesToLookInto = [];
         
@@ -119,9 +128,9 @@ module.exports = (course, stepCallback) => {
                     srcId = url.split('drop_box_').pop();
 
                     asyncLib.each(xmlAssignments, (xmlAssignment, eachCallback) => {
-
                         //somehow, the XML changed numbers and pushed all of the numbers up 3 which 
                         //makes this required. this shouldn't be required.. ¯\_(ツ)_/¯
+                        // console.log(`Compare: ${((parseInt(srcId)) + 3).toString()} == ${xmlAssignment.id}`);
                         if (((parseInt(srcId)) + 3).toString() === xmlAssignment.id) {
                             pagesToLookInto.push({
                                 'srcId': srcId,
@@ -162,9 +171,16 @@ module.exports = (course, stepCallback) => {
         });
     }
 
+    /****************************************************************
+     * getCorrectLinks
+     * 
+     * @param pagesToLookInto
+     * @param getCorrectLinksCallback
+     * 
+     * 
+    ******************************************************************/
     function getCorrectLinks(pagesToLookInto, getCorrectLinksCallback) {
         var brokenLinks = [];
-        JSON.stringify(`pagesToLookInto 2: ${pagesToLookInto}`);
         asyncLib.each(pagesToLookInto, (page, eachCallback) => {
             canvas.get(`/api/v1/courses/${course.info.canvasOU}/assignments?search_term=${page.d2l.name}`, (err, assignments) => {
                 if (err) {
@@ -188,13 +204,11 @@ module.exports = (course, stepCallback) => {
                         });
 
                         eachCallback(null);
-
                     //here, we know that there are only one quiz
                     } else {
                         //only one assignment returned. let's check the names to make sure
                         //that we got the correct one.
-
-                        if (assignments[0].name === page.page[0].title) {
+                        if (assignments[0].name === page.d2l.name) {
                             //link to replace the bad link
                             newUrl = assignments[0].html_url;
 
@@ -222,52 +236,72 @@ module.exports = (course, stepCallback) => {
     }
 
     /****************************************************************
+     * cleanUpArray
+     * 
+     * @param brokenLinks -- array of objects => badLink, newLink, page
+     * 
+     * 
+    ******************************************************************/
+    function cleanUpArray(brokenLinks) {
+        //might not be necessary
+        // brokenLinks.sort((a, b) => {
+        //     return a.page.title - b.page.title;
+        // });
+
+        //breaks the array into dictionaries based on the page.url
+        newBrokenLinks = _.groupBy(brokenLinks, (item) => {
+            return item.page.url;
+        });
+
+        //converts the dictionary into an array of arrays
+        //keys() return enumerable objects 
+        return Object.keys(newBrokenLinks).map((key) => {
+            return newBrokenLinks[key];
+        });
+    }
+
+    /****************************************************************
      * replaceLinks
      * 
-     * @param brokenLinks -- array of objects => badLink, newLink
-     * @param $ -- object -- cheerio
-     * @param pageUrl -- string
-     * @param functionCallback
+     * @param brokenLinks -- array of objects => badLink, newLink, page
+     * @param replaceLinkCallback
      * 
      * This function goes through and replaces all of the bad links with the correct links. 
      * If there are multiple instances of the same bad link through the page, this will
      * replace them all.
     ******************************************************************/
     function replaceLinks(brokenLinks, replaceLinkCallback) {
-        asyncLib.each(brokenLinks, (brokenLink, eachCallback) => {
-            var $ = cheerio.load(brokenLink.page.body);
+        var updatedBrokenLinksArray = cleanUpArray(brokenLinks);
+        // var updatedBrokenLinks = updatedBrokenLinksArray[0];
 
-            //grab all a tags in html
+        // console.log(`UpdatedBrokenLinks: ${JSON.stringify(updatedBrokenLinks)}`);
+
+        for (var i = 0; i < updatedBrokenLinksArray.length; i++) {
+            var urlToUpdate = updatedBrokenLinksArray[i][0].page.url;
+            var $ = cheerio.load(updatedBrokenLinksArray[i][0].page.body);
             var links = $('a');
 
-            //replace bad link with new one
-            links.attr('href', (i, link) => {
-                return link.replace(brokenLink.badLink, brokenLink.newLink);
-            });
+            for (x in updatedBrokenLinksArray[i]) {
+                //replace bad link with new one
+                links.attr('href', (index, link) => {
+                    return link.replace(updatedBrokenLinksArray[i][x].badLink, updatedBrokenLinksArray[i][x].newLink);
+                });
 
-            course.log(`replace-dropbox-quicklinks`, {
-                'badLink': brokenLink.badLink,
-                'newLink': brokenLink.newLink,
-                'page': brokenLink.page.url
-            });
-            
-            //the html has been fixed. call this function to push the changes online
-            htmlInjection(brokenLink.page.url, $.html(), (err) => {
-                if (err) {
-                    eachCallback(err);
-                } else {
-                    eachCallback(null);
+                course.log(`replace-dropbox-quicklinks`, {
+                    'badLink': updatedBrokenLinksArray[i][x].badLink,
+                    'newLink': updatedBrokenLinksArray[i][x].newLink,
+                    'page': updatedBrokenLinksArray[i][x].page.url
+                });
+            }
+
+            htmlInjection(urlToUpdate, $.html, (htmlInjectionErr) => {
+                if (htmlInjectionErr) {
+                    replaceLinkCallback(htmlInjectionErr);
                 }
             });
-        }, (err) => {
-            if (err) {
-                replaceLinkCallback(err);
-                return;
-            } else {
-                replaceLinkCallback(null);
-                return;
-            }
-        });
+        }
+
+        replaceLinkCallback(null);
     }
 
     /****************************************************************
@@ -275,7 +309,7 @@ module.exports = (course, stepCallback) => {
      * 
      * @param pageUrl -- string
      * @param html -- string
-     * @param functionCallback
+     * @param htmlInjectionCallback
      * 
      * This function makes an api call to Canvas and utilizes the update
      * page to update the body, which essentially holds the html.
@@ -309,7 +343,7 @@ module.exports = (course, stepCallback) => {
         var dropbox = getDropboxFile();
         
         //error checking
-        if (dropbox != undefined) {
+        if (typeof dropbox != "undefined") {
             var $ = dropbox.dom;
 
             //iterate through the xml nodes and retrieve the id and name 
