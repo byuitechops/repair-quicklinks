@@ -95,10 +95,9 @@ module.exports = (course, stepCallback) => {
             if (err) {
                 findDropboxesCallback(err);
                 return;
-            } else {
-                findDropboxesCallback(null, pagesWithDropboxLinks);
-                return;
             }
+                
+            findDropboxesCallback(null, pagesWithDropboxLinks);
         });
     }
 
@@ -164,10 +163,9 @@ module.exports = (course, stepCallback) => {
             if (eachSeriesErr) {
                 parsePagesCallback(eachSeriesErr);
                 return;
-            } else {
-                parsePagesCallback(null, pagesToLookInto);
-                return;
             }
+            
+            parsePagesCallback(null, pagesToLookInto);
         });
     }
 
@@ -228,10 +226,9 @@ module.exports = (course, stepCallback) => {
             if (err) {
                 getCorrectLinksCallback(err);
                 return;
-            } else {
-                getCorrectLinksCallback(null, brokenLinks);
-                return;
             }
+
+            getCorrectLinksCallback(null, brokenLinks);
         });
     }
 
@@ -276,32 +273,41 @@ module.exports = (course, stepCallback) => {
 
         // console.log(`UpdatedBrokenLinks: ${JSON.stringify(updatedBrokenLinks)}`);
 
-        for (var i = 0; i < updatedBrokenLinksArray.length; i++) {
-            var urlToUpdate = updatedBrokenLinksArray[i][0].page.url;
-            var $ = cheerio.load(updatedBrokenLinksArray[i][0].page.body);
+        asyncLib.each(updatedBrokenLinksArray, (updatedBrokenLink, eachCallback) => {
+            var urlToUpdate = updatedBrokenLink[0].page.url;
+            var $ = cheerio.load(updatedBrokenLink[0].page.body);
             var links = $('a');
 
-            for (x in updatedBrokenLinksArray[i]) {
+            updatedBrokenLink.forEach((item) => {
                 //replace bad link with new one
-                links.attr('href', (index, link) => {
-                    return link.replace(updatedBrokenLinksArray[i][x].badLink, updatedBrokenLinksArray[i][x].newLink);
+                links.attr('href', (i, link) => {
+                    return link.replace(item.badLink, item.newLink);
                 });
 
                 course.log(`replace-dropbox-quicklinks`, {
-                    'badLink': updatedBrokenLinksArray[i][x].badLink,
-                    'newLink': updatedBrokenLinksArray[i][x].newLink,
-                    'page': updatedBrokenLinksArray[i][x].page.url
+                    'badLink': item.badLink,
+                    'newLink': item.newLink,
+                    'page': urlToUpdate
                 });
-            }
-
-            htmlInjection(urlToUpdate, $.html, (htmlInjectionErr) => {
-                if (htmlInjectionErr) {
-                    replaceLinkCallback(htmlInjectionErr);
-                }
             });
-        }
 
-        replaceLinkCallback(null);
+            htmlInjection(urlToUpdate, $.html(), (htmlInjectionErr) => {
+                if (htmlInjectionErr) {
+                    eachCallback(htmlInjectionErr);
+                    return;
+                }
+
+                eachCallback(null);
+            });
+        }, (eachOfErr) => {
+            if (eachOfErr) {
+                replaceLinkCallback(eachOfErr);
+                return;
+            } 
+
+            replaceLinkCallback(null);
+            return;
+        });
     }
 
     /****************************************************************
@@ -323,10 +329,11 @@ module.exports = (course, stepCallback) => {
             if (err) {
                 htmlInjectionCallback(err);
                 return;
-            } else {
-                course.message(`Successfully injected new html in url: ${pageUrl}`);
-                htmlInjectionCallback(null);
             }
+                
+            course.message(`Successfully injected new html in url: ${pageUrl}`);
+            htmlInjectionCallback(null);
+            
         });
 
     }
@@ -390,6 +397,7 @@ module.exports = (course, stepCallback) => {
         asyncLib.waterfall(functions, (waterfallErr) => {
             if (waterfallErr) {
                 course.error(waterfallErr);
+                return;
             }
 
             course.message(`Successfully completed repair-quicklinks child module`);
