@@ -37,7 +37,7 @@ Describe in steps how the module accomplishes its goals.
 2. Go through the course and analyze every page.
 3. Utilize cheerio.js to grab every link on the page - it stores the results in an array
 4. If the link is a dropbox, the child module pushes the page into an array. 
-5. Once it finishes analyzing the page, it calls the fixDropbox function which then goes through the page again and extracts all of the dropbox links
+5. Once it finishes analyzing the page, it calls the getCorrectLinks function which then goes through the page again and extracts all of the dropbox links
 6. Extract the ID from the link (since the Brightspace D2L link ID is not different) and compare it with the previously created array that came from dropbox_d2l.xml
 to get the name of the dropbox.
 7. Make an API call to Canvas to retrieve the assignment and the URL of the dropbox in the course.
