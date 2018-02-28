@@ -127,10 +127,7 @@ module.exports = (course, stepCallback) => {
                     srcId = url.split('drop_box_').pop();
 
                     asyncLib.each(xmlAssignments, (xmlAssignment, eachCallback) => {
-                        //somehow, the XML changed numbers and pushed all of the numbers up 3 which 
-                        //makes this required. this shouldn't be required.. ¯\_(ツ)_/¯
-                        // console.log(`Compare: ${((parseInt(srcId)) + 3).toString()} == ${xmlAssignment.id}`);
-                        if (((parseInt(srcId)) + 3).toString() === xmlAssignment.id) {
+                        if (srcId === xmlAssignment.id) {
                             pagesToLookInto.push({
                                 'srcId': srcId,
                                 'd2l': xmlAssignment,
